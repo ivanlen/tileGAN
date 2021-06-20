@@ -1,0 +1,7 @@
+.idea
+__pycache__/
+
+# custom examples
+draw_points.py
+test.py
+basic_windows.py

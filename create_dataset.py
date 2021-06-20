@@ -95,15 +95,28 @@ if __name__ == '__main__':
 		chunk_descriptors = np.empty(chunk_descriptor_shape)
 		chunk_latents = np.empty(chunk_latents_shape)
 
-		descriptors_dataset = hdf5_file.create_dataset("descriptors", (0, total_desc_size), maxshape=(None, total_desc_size), dtype='uint8', chunks=chunk_descriptor_shape)
-		latents_dataset = hdf5_file.create_dataset("latents", (0, 512), maxshape=(None, 512), dtype='float32', chunks=chunk_latents_shape)
+		descriptors_dataset = hdf5_file.create_dataset(
+			"descriptors", (0, total_desc_size),
+			maxshape=(None, total_desc_size),
+			dtype='uint8',
+			chunks=chunk_descriptor_shape)
+		latents_dataset = hdf5_file.create_dataset(
+			"latents", (0, 512),
+			maxshape=(None, 512),
+			dtype='float32',
+			chunks=chunk_latents_shape)
 		chunk_count = 0
 
 		for run in tqdm(np.arange(num_latents // default_batch_size)):
 			latents = np.random.randn(default_batch_size, *Gs.input_shape[1:]).astype(np.float32)
 			labels = np.zeros([latents.shape[0], 0], np.float32)
 
-			padded_images = Gs.run(latents, labels, minibatch_size=minibatch_size, num_gpus=1, out_mul=127.5, out_add=127.5, out_dtype=np.uint8)
+			padded_images = Gs.run(latents, labels,
+								   minibatch_size=minibatch_size,
+								   num_gpus=1,
+								   out_mul=127.5,
+								   out_add=127.5,
+								   out_dtype=np.uint8)
 
 			batch_index = 0
 
@@ -148,7 +161,12 @@ if __name__ == '__main__':
 	hdf5_file.close()
 
 	def get_averaged_cluster_centers(clustering, num_clusters):
-		"""Generates plot to view the cluster centroids."""
+		"""Generates plot to view the cluster centroids.
+		Ivan, aca agarramos los centroides de cada cluster, que son de szie t_size, t_size, 3, y nos quedamos con
+		cada uno de esos centroides.
+
+		El clustering es sobre el espacio latente, no sobre el espacio real.
+		"""
 		average_images = np.zeros((num_clusters, t_size, t_size, 3), dtype=np.uint8)
 		for c in range(num_clusters):
 			pixData = clustering.cluster_centers_[c, :]
@@ -158,16 +176,27 @@ if __name__ == '__main__':
 		return average_images
 
 	def get_upsampled_cluster_centers(clustering, num_clusters, latents, descriptors):
-		"""Generates plot to view the cluster centroids."""
+		"""Generates plot to view the cluster centroids.
+		Aca agararmos el latent de menor distancia, y con ese latente generamos imagenes de referencia.
+		terminan habiendo tantas imagenes como clusters de refrencia.
+		"""
 		m = 1
 		cluster_images = np.zeros((num_clusters, Gs.output_shape[3], Gs.output_shape[3], 3), dtype=np.uint8)
+		# ivan: aca clusterizan, y se quedan con la imagen mas cercana a todas, despues usan esa para generar una imagen
+		# de referencia
 		for c in range(num_clusters):
 			distances = clustering.transform(descriptors)[:, c]
 			ind = np.argsort(distances)[::][:m]  # n closest latents
 			closest_latents = latents[ind]
 			labels = np.zeros([closest_latents.shape[0], 0], np.float32)
 
-			outputs = Gs.run(closest_latents, labels, minibatch_size=minibatch_size, num_gpus=1, out_mul=127.5, out_add=127.5, out_dtype=np.uint8)
+			outputs = Gs.run(closest_latents,
+							 labels,
+							 minibatch_size=minibatch_size,
+							 num_gpus=1,
+							 out_mul=127.5,
+							 out_add=127.5,
+							 out_dtype=np.uint8)
 			cluster_images[c] = np.rollaxis(outputs[0], 0, 3)
 		return cluster_images
 
