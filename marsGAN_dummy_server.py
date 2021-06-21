@@ -28,22 +28,21 @@ class PlanetServer:
 	def __init__(self):
 		## INI HARCODED --------------------
 
-		n_reds = 20
+		n_reds = 10
 		n_greens = 25
 		n_blues = 30
+		random_color = 255 / 3
+		self.h_res = 64
 		self.h_n_colors = [n_reds, n_greens, n_blues]
-		self.h_reds = np.random.random((n_reds, 256, 256, 3)) * 30
-		self.h_reds[:, :, :, 0] = np.ones((n_reds, 256, 256)) * 255
-		self.h_greens = np.random.random((n_greens, 256, 256, 3)) * 30
-		self.h_greens[:, :, :, 1] = np.ones((n_greens, 256, 256)) * 255
-		self.h_blues = np.random.random((n_blues, 256, 256, 3)) * 30
-		self.h_blues[:, :, :, 2] = np.ones((n_blues, 256, 256)) * 255
-
+		self.h_n_total = np.sum(self.h_n_colors)
+		self.h_reds = np.random.random((n_reds, self.h_res, self.h_res, 3)) * random_color
+		self.h_reds[:, :, :, 0] = np.ones((n_reds, self.h_res, self.h_res)) * 255
+		self.h_greens = np.random.random((n_greens, self.h_res, self.h_res, 3)) * random_color
+		self.h_greens[:, :, :, 1] = np.ones((n_greens, self.h_res, self.h_res)) * 255
+		self.h_blues = np.random.random((n_blues, self.h_res, self.h_res, 3)) * random_color
+		self.h_blues[:, :, :, 2] = np.ones((n_blues, self.h_res, self.h_res)) * 255
+		self.h_all_colors = np.concatenate([self.h_reds, self.h_greens, self.h_blues])
 		## END HARCODED
-
-
-
-
 
 
 
@@ -387,7 +386,7 @@ class PlanetServer:
 		# self.latentLookup = hdf5_file["latents"].value
 		# self.clusterLookup = hdf5_file["clusters"].value
 		""" t_size = 20 by default in create_dataset
-		default_batch_size = 1000 by default, here is 75
+		default_batch_size = 1000 by default, here is self.h_n_total
 		total_desc_size = t_size * t_size * channels
 			"""
 
@@ -395,7 +394,7 @@ class PlanetServer:
 		desc_aux = np.array([self.h_reds[0], self.h_greens[0], self.h_blues[0]]).astype('uint8')
 		self.descriptorLookup = np.array([np.ravel(x[:20, :20, :]) for x in desc_aux])
 		# IVAN: this are the latents that generate the images, float32
-		self.latentLookup = np.random.random((75, 512)).astype('float32')
+		self.latentLookup = np.random.random((self.h_n_total, 512)).astype('float32')
 		# IVAN: this are the kmeans.labels_
 		self.clusterLookup = np.concatenate([np.ones(x) * i for i, x in enumerate(self.h_n_colors)])
 
@@ -1159,36 +1158,54 @@ class PlanetServer:
 					# get image output for chunk
 					latentChunk[:, :, :chunkH, :chunkW] = intermLatentGrid[:, :, y:y + chunkH, x:x + chunkW]
 					try:
-						_, chunkOutput = self.GsB.run(latentChunk, in_res=self.mergeLevel + 1, out_res=self.outRes,
-													  latent_size=[None, s[1], chunkShape, chunkShape],
-													  latent_depth=s[1], minibatch_size=32, num_gpus=1,
-													  out_mul=127.5, out_add=127.5, out_dtype=np.uint8)
-						chunkOutput = np.squeeze(chunkOutput)
+						# _, chunkOutput = self.GsB.run(latentChunk, in_res=self.mergeLevel + 1, out_res=self.outRes,
+						# 							  latent_size=[None, s[1], chunkShape, chunkShape],
+						# 							  latent_depth=s[1], minibatch_size=32, num_gpus=1,
+						# 							  out_mul=127.5, out_add=127.5, out_dtype=np.uint8)
+						# IVAN: first test, putt a random image
+						# In the case of a color image, it is a 3D ndarray of row (height) x column (width) x color (3)
+						patch_res = self.h_res
+						outpupt_image = np.zeros((patch_res * chunkH, patch_res * chunkW, 3)).astype('uint8')
+						# chunkOutput = np.zeros((chunkH, chunkW, patch_res, patch_res, 3))
+						for yi in range(chunkH):
+							for xi in range(chunkW):
+								i = np.random.randint(0, self.h_n_total)
+								# chunkOutput[yi, xi, :, :, :] = self.h_all_colors[i, :, :, :]
+								outpupt_image[
+								yi * patch_res: (yi + 1) * patch_res,
+								xi * patch_res: (xi + 1) * patch_res,
+								:] = self.h_all_colors[i, :, :, :].astype('uint8')
+						self.output[:, :, :] = np.moveaxis(outpupt_image, 2, 0)
+						# chunkOutput = outpupt_image
 					except ValueError:
-						print('latentChunk shape', latentChunk.shape)
-						print('GsB input shape', self.GsB.input_shape)
+						raise NotImplementedError
+						# print('latentChunk shape', latentChunk.shape)
+						# print('GsB input shape', self.GsB.input_shape)
 
-					# fix zero-padding issue by subtracting chunk overlap region from chunk borders, unless chunk is at image edge
-					if x == 0:
-						marginL = 0
-					else:
-						marginL = chunkOverlap
-					if y == 0:
-						marginT = 0
-					else:
-						marginT = chunkOverlap
-					if x >= gridW - chunkShape:
-						marginR = 0
-					else:
-						marginR = chunkOverlap
-					if y >= gridH - chunkShape:
-						marginB = 0
-					else:
-						marginB = chunkOverlap
-					pasteRegion = chunkOutput[:, marginT * outSize:(chunkH - marginB) * outSize,
-								  marginL * outSize:(chunkW - marginR) * outSize]
-					self.output[:, (y + marginT) * outSize: (y + chunkH - marginB) * outSize,
-					(x + marginL) * outSize: (x + chunkW - marginR) * outSize] = pasteRegion
+					# # fix zero-padding issue by subtracting chunk overlap region from chunk borders, unless chunk is at image edge
+					# if x == 0:
+					# 	marginL = 0
+					# else:
+					# 	marginL = chunkOverlap
+					# if y == 0:
+					# 	marginT = 0
+					# else:
+					# 	marginT = chunkOverlap
+					# if x >= gridW - chunkShape:
+					# 	marginR = 0
+					# else:
+					# 	marginR = chunkOverlap
+					# if y >= gridH - chunkShape:
+					# 	marginB = 0
+					# else:
+					# 	marginB = chunkOverlap
+					# pasteRegion = chunkOutput[:,
+					# 			  marginT * outSize:(chunkH - marginB) * outSize,
+					# 			  marginL * outSize:(chunkW - marginR) * outSize]
+					# self.output[
+					# :,
+					# (y + marginT) * outSize: (y + chunkH - marginB) * outSize,
+					# (x + marginL) * outSize: (x + chunkW - marginR) * outSize] = pasteRegion
 			return np.squeeze(self.output)
 		else:  # if chunking is disabled, process entire grid
 			raise NotImplementedError
